@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mini Space Invaders</title>
+  <style>
+    body { margin: 0; background: #101020; color: white; font-family: Arial, sans-serif; text-align: center; }
+    canvas { background: #080814; border: 2px solid #6cf; max-width: 95vw; margin-top: 10px; }
+    p { color: #bbb; }
+  </style>
+</head>
+<body>
+  <h1>Space Invaders</h1>
+  <p>Move: ← → or A / D &nbsp; | &nbsp; Shoot: Space &nbsp; | &nbsp; Restart: R</p>
+  <canvas id="game" width="480" height="560"></canvas>
+  <script>
+    const canvas = document.getElementById('game');
+    const ctx = canvas.getContext('2d');
+    const keys = {};
+    let player, bullets, enemies, direction, score, gameOver, won, lastShot;
+
+    function reset() {
+      player = { x: 220, y: 515, w: 40, h: 18, speed: 5 };
+      bullets = [];
+      enemies = [];
+      for (let row = 0; row < 3; row++) {
+        for (let col = 0; col < 8; col++) {
+          enemies.push({ x: 40 + col * 50, y: 65 + row * 44, w: 30, h: 22 });
+        }
+      }
+      direction = 1;
+      score = 0;
+      gameOver = false;
+      won = false;
+      lastShot = 0;
+    }
+
+    document.addEventListener('keydown', e => {
+      if (['ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
+      keys[e.code] = true;
+      if (e.code === 'KeyR') reset();
+    });
+    document.addEventListener('keyup', e => { keys[e.code] = false; });
+
+    function hit(a, b) {
+      return a.x < b.x + b.w && a.x + a.w > b.x &&
+             a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function update(time) {
+      if (gameOver) return;
+      if (keys.ArrowLeft || keys.KeyA) player.x -= player.speed;
+      if (keys.ArrowRight || keys.KeyD) player.x += player.speed;
+      player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+
+      if (keys.Space && time - lastShot > 260) {
+        bullets.push({ x: player.x + player.w / 2 - 2, y: player.y, w: 4, h: 12 });
+        lastShot = time;
+      }
+      for (const bullet of bullets) bullet.y -= 7;
+      bullets = bullets.filter(b => b.y + b.h > 0);
+
+      const speed = 0.6 + score * 0.012;
+      if (enemies.some(e => e.x + direction * speed < 5 || e.x + e.w + direction * speed > canvas.width - 5)) {
+        direction *= -1;
+        for (const e of enemies) e.y += 18;
+      }
+      for (const e of enemies) {
+        e.x += direction * speed;
+        if (e.y + e.h >= player.y || hit(e, player)) gameOver = true;
+      }
+
+      for (const bullet of bullets) {
+        for (const enemy of enemies) {
+          if (hit(bullet, enemy)) {
+            bullet.dead = true;
+            enemy.dead = true;
+            score += 10;
+            break;
+          }
+        }
+      }
+      bullets = bullets.filter(b => !b.dead);
+      enemies = enemies.filter(e => !e.dead);
+      if (enemies.length === 0) { won = true; gameOver = true; }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = '#fff';
+      ctx.font = '20px Arial';
+      ctx.fillText('Score: ' + score, 15, 30);
+
+      ctx.fillStyle = '#56f0bd';
+      ctx.fillRect(player.x, player.y, player.w, player.h);
+      ctx.fillRect(player.x + 16, player.y - 9, 8, 9);
+
+      ctx.fillStyle = '#ffe16b';
+      for (const b of bullets) ctx.fillRect(b.x, b.y, b.w, b.h);
+
+      ctx.fillStyle = '#ff628c';
+      for (const e of enemies) {
+        ctx.fillRect(e.x, e.y, e.w, e.h);
+        ctx.fillStyle = '#080814';
+        ctx.fillRect(e.x + 7, e.y + 7, 4, 4);
+        ctx.fillRect(e.x + 19, e.y + 7, 4, 4);
+        ctx.fillStyle = '#ff628c';
+      }
+
+      if (gameOver) {
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#fff';
+        ctx.textAlign = 'center';
+        ctx.font = '32px Arial';
+        ctx.fillText(won ? 'YOU WIN!' : 'GAME OVER', canvas.width / 2, 250);
+        ctx.font = '18px Arial';
+        ctx.fillText('Press R to restart', canvas.width / 2, 290);
+        ctx.textAlign = 'left';
+      }
+    }
+
+    function loop(time) {
+      update(time);
+      draw();
+      requestAnimationFrame(loop);
+    }
+    reset();
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
