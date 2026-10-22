@@ -19,11 +19,14 @@
     const ctx = canvas.getContext('2d');
     const keys = {};
     let player, bullets, enemies, direction, score, gameOver, won, lastShot;
+    let explosions = [], previousTime;
 
     function reset() {
       player = { x: 220, y: 515, w: 40, h: 18, speed: 5 };
       bullets = [];
       enemies = [];
+      explosions = [];
+      previousTime = undefined;
       for (let row = 0; row < 3; row++) {
         for (let col = 0; col < 8; col++) {
           enemies.push({ x: 40 + col * 50, y: 65 + row * 44, w: 30, h: 22 });
@@ -46,6 +49,33 @@
     function hit(a, b) {
       return a.x < b.x + b.w && a.x + a.w > b.x &&
              a.y < b.y + b.h && a.y + a.h > b.y;
+    }
+
+    function explode(ship) {
+      const particles = [];
+      for (let i = 0; i < 22; i++) {
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 45 + Math.random() * 135;
+        particles.push({
+          x: 0, y: 0,
+          vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+          size: 2 + Math.random() * 4,
+          color: ['#fff4b0', '#ffbd4a', '#ff7043', '#ff628c'][i % 4]
+        });
+      }
+      explosions.push({ x: ship.x + ship.w / 2, y: ship.y + ship.h / 2, age: 0, particles });
+    }
+
+    function updateExplosions(dt) {
+      for (const explosion of explosions) {
+        explosion.age += dt;
+        for (const p of explosion.particles) {
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.vy += 90 * dt;
+        }
+      }
+      explosions = explosions.filter(explosion => explosion.age < 0.6);
     }
 
     function update(time) {
@@ -73,9 +103,10 @@
 
       for (const bullet of bullets) {
         for (const enemy of enemies) {
-          if (hit(bullet, enemy)) {
+          if (!enemy.dead && hit(bullet, enemy)) {
             bullet.dead = true;
             enemy.dead = true;
+            explode(enemy);
             score += 10;
             break;
           }
@@ -108,7 +139,33 @@
         ctx.fillStyle = '#ff628c';
       }
 
-      if (gameOver) {
+      for (const explosion of explosions) {
+        const progress = explosion.age / 0.6;
+        ctx.save();
+        ctx.translate(explosion.x, explosion.y);
+        // A quick bright flash and expanding shockwave lead into fading debris.
+        if (explosion.age < 0.15) {
+          ctx.globalAlpha = 1 - explosion.age / 0.15;
+          ctx.fillStyle = '#fff4b0';
+          ctx.beginPath();
+          ctx.arc(0, 0, 8 + explosion.age * 80, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1 - progress;
+        ctx.strokeStyle = '#ffbd4a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 5 + progress * 35, 0, Math.PI * 2);
+        ctx.stroke();
+        for (const p of explosion.particles) {
+          ctx.fillStyle = p.color;
+          const size = p.size * (1 - progress);
+          ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+        }
+        ctx.restore();
+      }
+
+      if (gameOver && explosions.length === 0) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#fff';
@@ -122,6 +179,9 @@
     }
 
     function loop(time) {
+      const dt = previousTime === undefined ? 0 : Math.min((time - previousTime) / 1000, 0.05);
+      previousTime = time;
+      updateExplosions(dt);
       update(time);
       draw();
       requestAnimationFrame(loop);
@@ -131,4 +191,3 @@
   </script>
 </body>
 </html>
-
