@@ -13,72 +13,97 @@
 <body>
   <h1>Space Invaders</h1>
   <p>Move: ← → or A / D &nbsp; | &nbsp; Shoot: Space &nbsp; | &nbsp; Restart: R</p>
+  <p>Two rounds · Five hearts · Each escaped plane costs one heart</p>
   <canvas id="game" width="480" height="560"></canvas>
   <script>
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
-    let playerSprite;
-    const playerImage = new Image();
-    playerImage.onload = () => {
-      const sprite = document.createElement('canvas');
-      sprite.width = playerImage.naturalWidth;
-      sprite.height = playerImage.naturalHeight;
-      const spriteCtx = sprite.getContext('2d');
-      spriteCtx.drawImage(playerImage, 0, 0);
-      const pixels = spriteCtx.getImageData(0, 0, sprite.width, sprite.height);
-      const data = pixels.data;
-      const visited = new Uint8Array(sprite.width * sprite.height);
-      const pending = [];
-      // Only remove pale background connected to the edges, preserving the white hull.
-      function visit(index) {
-        if (visited[index]) return;
-        visited[index] = 1;
-        const offset = index * 4;
-        if (data[offset] > 210 && data[offset + 1] > 210 && data[offset + 2] > 210) {
-          data[offset + 3] = 0;
-          pending.push(index);
+    const sprites = {};
+    function loadSprite(name, path) {
+      const playerImage = new Image();
+      playerImage.onload = () => {
+        const sprite = document.createElement('canvas');
+        sprite.width = playerImage.naturalWidth;
+        sprite.height = playerImage.naturalHeight;
+        const spriteCtx = sprite.getContext('2d');
+        spriteCtx.drawImage(playerImage, 0, 0);
+        const pixels = spriteCtx.getImageData(0, 0, sprite.width, sprite.height);
+        const data = pixels.data;
+        const visited = new Uint8Array(sprite.width * sprite.height);
+        const pending = [];
+        // Only remove pale background connected to the edges, preserving the white hull.
+        function visit(index) {
+          if (visited[index]) return;
+          visited[index] = 1;
+          const offset = index * 4;
+          if (data[offset] > 210 && data[offset + 1] > 210 && data[offset + 2] > 210) {
+            data[offset + 3] = 0;
+            pending.push(index);
+          }
         }
-      }
-      for (let x = 0; x < sprite.width; x++) {
-        visit(x);
-        visit((sprite.height - 1) * sprite.width + x);
-      }
-      for (let y = 0; y < sprite.height; y++) {
-        visit(y * sprite.width);
-        visit(y * sprite.width + sprite.width - 1);
-      }
-      while (pending.length) {
-        const index = pending.pop();
-        const x = index % sprite.width;
-        if (x > 0) visit(index - 1);
-        if (x < sprite.width - 1) visit(index + 1);
-        if (index >= sprite.width) visit(index - sprite.width);
-        if (index < sprite.width * (sprite.height - 1)) visit(index + sprite.width);
-      }
-      spriteCtx.putImageData(pixels, 0, 0);
-      playerSprite = sprite;
-    };
-    playerImage.src = './Pixel Art Fighter Ship.png';
+        for (let x = 0; x < sprite.width; x++) {
+          visit(x);
+          visit((sprite.height - 1) * sprite.width + x);
+        }
+        for (let y = 0; y < sprite.height; y++) {
+          visit(y * sprite.width);
+          visit(y * sprite.width + sprite.width - 1);
+        }
+        while (pending.length) {
+          const index = pending.pop();
+          const x = index % sprite.width;
+          if (x > 0) visit(index - 1);
+          if (x < sprite.width - 1) visit(index + 1);
+          if (index >= sprite.width) visit(index - sprite.width);
+          if (index < sprite.width * (sprite.height - 1)) visit(index + sprite.width);
+        }
+        spriteCtx.putImageData(pixels, 0, 0);
+        let left = sprite.width, top = sprite.height, right = 0, bottom = 0;
+        for (let y = 0; y < sprite.height; y++) {
+          for (let x = 0; x < sprite.width; x++) {
+            if (data[(y * sprite.width + x) * 4 + 3]) {
+              left = Math.min(left, x); top = Math.min(top, y);
+              right = Math.max(right, x); bottom = Math.max(bottom, y);
+            }
+          }
+        }
+        sprites[name] = { image: sprite, x: left, y: top, w: right - left + 1, h: bottom - top + 1 };
+      };
+      playerImage.onerror = () => console.error('Could not load plane asset:', path);
+      playerImage.src = path;
+    }
+    loadSprite('player', './Pixel-Art Blue Delta Fighter.png');
+    loadSprite('enemy', './Red and White Pixel Spaceship.png');
     const keys = {};
-    let player, bullets, enemies, direction, score, gameOver, won, lastShot;
+    const rounds = [
+      { total: 12, speed: 65, interval: 1.05 },
+      { total: 20, speed: 110, interval: 0.65 }
+    ];
+    let player, bullets, enemies, score, gameOver, won, lastShot;
+    let hearts, round, spawned, spawnTimer, transition, damageFlash;
     let explosions = [], previousTime;
 
-    function reset() {
-      player = { x: 212, y: 500, w: 56, h: 50, speed: 5 };
-      bullets = [];
+    function startRound(number) {
+      round = number;
       enemies = [];
+      bullets = [];
+      spawned = 0;
+      spawnTimer = 0.4;
+      transition = 0;
+    }
+
+    function reset() {
+      player = { x: 214, y: 493, w: 52, h: 56, speed: 300 };
       explosions = [];
       previousTime = undefined;
-      for (let row = 0; row < 3; row++) {
-        for (let col = 0; col < 8; col++) {
-          enemies.push({ x: 40 + col * 50, y: 65 + row * 44, w: 30, h: 22 });
-        }
-      }
-      direction = 1;
       score = 0;
+      hearts = 5;
+      damageFlash = 0;
       gameOver = false;
       won = false;
-      lastShot = 0;
+      lastShot = -Infinity;
+      for (const key in keys) delete keys[key];
+      startRound(1);
     }
 
     document.addEventListener('keydown', e => {
@@ -87,6 +112,7 @@
       if (e.code === 'KeyR') reset();
     });
     document.addEventListener('keyup', e => { keys[e.code] = false; });
+    window.addEventListener('blur', () => { for (const key in keys) delete keys[key]; });
 
     function hit(a, b) {
       return a.x < b.x + b.w && a.x + a.w > b.x &&
@@ -120,29 +146,32 @@
       explosions = explosions.filter(explosion => explosion.age < 0.6);
     }
 
-    function update(time) {
+    function update(time, dt) {
+      damageFlash = Math.max(0, damageFlash - dt);
       if (gameOver) return;
-      if (keys.ArrowLeft || keys.KeyA) player.x -= player.speed;
-      if (keys.ArrowRight || keys.KeyD) player.x += player.speed;
+      if (transition > 0) {
+        transition -= dt;
+        if (transition <= 0) startRound(2);
+        return;
+      }
+      if (keys.ArrowLeft || keys.KeyA) player.x -= player.speed * dt;
+      if (keys.ArrowRight || keys.KeyD) player.x += player.speed * dt;
       player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
-
       if (keys.Space && time - lastShot > 260) {
         bullets.push({ x: player.x + player.w / 2 - 2, y: player.y, w: 4, h: 12 });
         lastShot = time;
       }
-      for (const bullet of bullets) bullet.y -= 7;
-      bullets = bullets.filter(b => b.y + b.h > 0);
-
-      const speed = 0.6 + score * 0.012;
-      if (enemies.some(e => e.x + direction * speed < 5 || e.x + e.w + direction * speed > canvas.width - 5)) {
-        direction *= -1;
-        for (const e of enemies) e.y += 18;
+      const config = rounds[round - 1];
+      spawnTimer -= dt;
+      if (spawned < config.total && spawnTimer <= 0) {
+        // Alternate lanes so each round covers the whole playing field.
+        const lane = (spawned * 3 + Math.floor(spawned / 7)) % 7;
+        enemies.push({ x: 20 + lane * 65, y: -42, w: 44, h: 38 });
+        spawned++;
+        spawnTimer += config.interval;
       }
-      for (const e of enemies) {
-        e.x += direction * speed;
-        if (e.y + e.h >= player.y || hit(e, player)) gameOver = true;
-      }
-
+      for (const bullet of bullets) bullet.y -= 440 * dt;
+      for (const enemy of enemies) enemy.y += config.speed * dt;
       for (const bullet of bullets) {
         for (const enemy of enemies) {
           if (!enemy.dead && hit(bullet, enemy)) {
@@ -154,36 +183,84 @@
           }
         }
       }
-      bullets = bullets.filter(b => !b.dead);
+      for (const enemy of enemies) {
+        if (!enemy.dead && (enemy.y >= canvas.height || hit(enemy, player))) {
+          enemy.dead = true;
+          hearts = Math.max(0, hearts - 1);
+          damageFlash = 0.25;
+          if (hit(enemy, player)) explode(enemy);
+          if (hearts === 0) { gameOver = true; break; }
+        }
+      }
+      bullets = bullets.filter(b => !b.dead && b.y + b.h > 0);
       enemies = enemies.filter(e => !e.dead);
-      if (enemies.length === 0) { won = true; gameOver = true; }
+      if (!gameOver && spawned === config.total && enemies.length === 0) {
+        if (round === 1) transition = 2;
+        else { won = true; gameOver = true; }
+      }
+    }
+
+    function drawPlane(name, ship, facingDown = false) {
+      const sprite = sprites[name];
+      ctx.save();
+      ctx.translate(ship.x + ship.w / 2, ship.y + ship.h / 2);
+      if (facingDown) ctx.rotate(Math.PI);
+      if (sprite) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(sprite.image, sprite.x, sprite.y, sprite.w, sprite.h,
+          -ship.w / 2, -ship.h / 2, ship.w, ship.h);
+      } else {
+        ctx.fillStyle = name === 'player' ? '#35baff' : '#ff4560';
+        ctx.beginPath();
+        ctx.moveTo(0, -ship.h / 2);
+        ctx.lineTo(ship.w / 2, ship.h / 2);
+        ctx.lineTo(0, ship.h / 4);
+        ctx.lineTo(-ship.w / 2, ship.h / 2);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
     }
 
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#fff';
-      ctx.font = '20px Arial';
-      ctx.fillText('Score: ' + score, 15, 30);
-
-      if (playerSprite) {
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(playerSprite, 184, 230, 886, 793, player.x, player.y, player.w, player.h);
-      } else {
-        ctx.fillStyle = '#56f0bd';
-        ctx.fillRect(player.x, player.y, player.w, player.h);
-        ctx.fillRect(player.x + player.w / 2 - 4, player.y - 9, 8, 9);
-      }
-
+      drawPlane('player', player);
       ctx.fillStyle = '#ffe16b';
       for (const b of bullets) ctx.fillRect(b.x, b.y, b.w, b.h);
-
-      ctx.fillStyle = '#ff628c';
-      for (const e of enemies) {
-        ctx.fillRect(e.x, e.y, e.w, e.h);
-        ctx.fillStyle = '#080814';
-        ctx.fillRect(e.x + 7, e.y + 7, 4, 4);
-        ctx.fillRect(e.x + 19, e.y + 7, 4, 4);
-        ctx.fillStyle = '#ff628c';
+      for (const e of enemies) drawPlane('enemy', e, true);
+      // Keep the HUD readable as enemies enter from the top.
+      ctx.fillStyle = '#101020';
+      ctx.fillRect(0, 0, canvas.width, 62);
+      ctx.fillStyle = '#fff';
+      ctx.font = '18px Arial';
+      ctx.fillText('Score: ' + score, 15, 25);
+      ctx.textAlign = 'right';
+      ctx.fillText('Round ' + round + ' / 2', canvas.width - 15, 25);
+      ctx.textAlign = 'left';
+      ctx.font = '24px Arial';
+      for (let i = 0; i < 5; i++) {
+        ctx.fillStyle = i < hearts ? '#ff628c' : '#454558';
+        ctx.fillText(i < hearts ? '♥' : '♡', 15 + i * 27, 52);
+      }
+      ctx.fillStyle = '#a8b5cf';
+      ctx.font = '13px Arial';
+      ctx.textAlign = 'right';
+      ctx.fillText(round === 1 ? 'Easy · 12 planes' : 'Hard · 20 planes', canvas.width - 15, 49);
+      ctx.textAlign = 'left';
+      if (damageFlash > 0) {
+        ctx.fillStyle = 'rgba(255, 65, 95, ' + damageFlash * 0.6 + ')';
+        ctx.fillRect(0, 62, canvas.width, canvas.height - 62);
+      }
+      if (transition > 0) {
+        ctx.fillStyle = 'rgba(8, 8, 20, 0.8)';
+        ctx.fillRect(0, 180, canvas.width, 145);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#fff';
+        ctx.font = '28px Arial';
+        ctx.fillText('ROUND 1 COMPLETE', canvas.width / 2, 230);
+        ctx.font = '17px Arial';
+        ctx.fillText('Round 2: faster planes, more enemies!', canvas.width / 2, 270);
+        ctx.textAlign = 'left';
       }
 
       for (const explosion of explosions) {
@@ -217,8 +294,8 @@
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = '#fff';
         ctx.textAlign = 'center';
-        ctx.font = '32px Arial';
-        ctx.fillText(won ? 'YOU WIN!' : 'GAME OVER', canvas.width / 2, 250);
+        ctx.font = '26px Arial';
+        ctx.fillText(won ? 'BOTH ROUNDS COMPLETE!' : 'GAME OVER', canvas.width / 2, 250);
         ctx.font = '18px Arial';
         ctx.fillText('Press R to restart', canvas.width / 2, 290);
         ctx.textAlign = 'left';
@@ -229,7 +306,7 @@
       const dt = previousTime === undefined ? 0 : Math.min((time - previousTime) / 1000, 0.05);
       previousTime = time;
       updateExplosions(dt);
-      update(time);
+      update(time, dt);
       draw();
       requestAnimationFrame(loop);
     }
