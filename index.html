@@ -17,12 +17,54 @@
   <script>
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
+    let playerSprite;
+    const playerImage = new Image();
+    playerImage.onload = () => {
+      const sprite = document.createElement('canvas');
+      sprite.width = playerImage.naturalWidth;
+      sprite.height = playerImage.naturalHeight;
+      const spriteCtx = sprite.getContext('2d');
+      spriteCtx.drawImage(playerImage, 0, 0);
+      const pixels = spriteCtx.getImageData(0, 0, sprite.width, sprite.height);
+      const data = pixels.data;
+      const visited = new Uint8Array(sprite.width * sprite.height);
+      const pending = [];
+      // Only remove pale background connected to the edges, preserving the white hull.
+      function visit(index) {
+        if (visited[index]) return;
+        visited[index] = 1;
+        const offset = index * 4;
+        if (data[offset] > 210 && data[offset + 1] > 210 && data[offset + 2] > 210) {
+          data[offset + 3] = 0;
+          pending.push(index);
+        }
+      }
+      for (let x = 0; x < sprite.width; x++) {
+        visit(x);
+        visit((sprite.height - 1) * sprite.width + x);
+      }
+      for (let y = 0; y < sprite.height; y++) {
+        visit(y * sprite.width);
+        visit(y * sprite.width + sprite.width - 1);
+      }
+      while (pending.length) {
+        const index = pending.pop();
+        const x = index % sprite.width;
+        if (x > 0) visit(index - 1);
+        if (x < sprite.width - 1) visit(index + 1);
+        if (index >= sprite.width) visit(index - sprite.width);
+        if (index < sprite.width * (sprite.height - 1)) visit(index + sprite.width);
+      }
+      spriteCtx.putImageData(pixels, 0, 0);
+      playerSprite = sprite;
+    };
+    playerImage.src = 'Assets/Pixel Art Fighter Ship.png';
     const keys = {};
     let player, bullets, enemies, direction, score, gameOver, won, lastShot;
     let explosions = [], previousTime;
 
     function reset() {
-      player = { x: 220, y: 515, w: 40, h: 18, speed: 5 };
+      player = { x: 212, y: 500, w: 56, h: 50, speed: 5 };
       bullets = [];
       enemies = [];
       explosions = [];
@@ -123,9 +165,14 @@
       ctx.font = '20px Arial';
       ctx.fillText('Score: ' + score, 15, 30);
 
-      ctx.fillStyle = '#56f0bd';
-      ctx.fillRect(player.x, player.y, player.w, player.h);
-      ctx.fillRect(player.x + 16, player.y - 9, 8, 9);
+      if (playerSprite) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(playerSprite, 184, 230, 886, 793, player.x, player.y, player.w, player.h);
+      } else {
+        ctx.fillStyle = '#56f0bd';
+        ctx.fillRect(player.x, player.y, player.w, player.h);
+        ctx.fillRect(player.x + player.w / 2 - 4, player.y - 9, 8, 9);
+      }
 
       ctx.fillStyle = '#ffe16b';
       for (const b of bullets) ctx.fillRect(b.x, b.y, b.w, b.h);
